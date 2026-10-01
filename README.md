@@ -1,3 +1,11 @@
+# NetHack / NLE 1.3.0 binary UI fork
+
+This maintained branch starts at upstream `v1.3.0` (`70cb9b5260d05b38ee1ee1b0228d5f6f8ca54655`),
+which includes NetHack 3.6.7. The game sources here include an optional binary UI v3
+and no-screen mode. Existing NLE observation/settings ABI, game rules and keys are preserved.
+See [binary UI and maintenance](doc/nle/BINARY_UI.md) and the canonical [C header](include/nle_ui.h).
+The changes are kept directly in this fork's source files. Modified 2026-10-01.
+
 ![NetHack Learning Environment (NLE)](https://github.com/NetHack-LE/nle/raw/main/dat/nle/logo.png)
 
 --------------------------------------------------------------------------------

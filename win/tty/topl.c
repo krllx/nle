@@ -1,4 +1,4 @@
-/* NetHack 3.6	topl.c	$NHDT-Date: 1560608320 2019/06/15 14:18:40 $  $NHDT-Branch: NetHack-3.6 $:$NHDT-Revision: 1.47 $ */
+/* NetHack 3.6	topl.c	$NHDT-Date: 1560608320 2019/06/15 14:18:40 $  $NHDT-Branch: NetHack-3.6 $:$NHDT-Revision: 1.47 $ */ /* Binary UI modifications, 2026-10-01; see doc/nle/BINARY_UI.md. */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Michael Allison, 2009. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -9,6 +9,7 @@
 
 #include "tcap.h"
 #include "wintty.h"
+#include "nle_ui.h"
 
 #ifndef C /* this matches src/cmd.c */
 #define C(c) (0x1f & (c))
@@ -138,6 +139,7 @@ const char *str;
     end_glyphout(); /* in case message printed during graphics output */
     putsyms(str);
     cl_end();
+    nle_ui_message(str, 1);
     ttyDisplay->toplin = 1;
     if (ttyDisplay->cury && otoplin != 3)
         more();
@@ -196,6 +198,7 @@ const char *s;
     tty_curs(BASE_WINDOW, cw->curx + 1, cw->cury);
     putsyms(s);
     cl_end();
+    nle_ui_message(s, 0);
     ttyDisplay->toplin = 1;
 }
 
@@ -218,7 +221,9 @@ more()
 
     if (flags.standout)
         standoutbeg();
+    nle_ui_more_marker();
     putsyms(defmorestr);
+    nle_ui_more_shown();
     if (flags.standout)
         standoutend();
 
@@ -411,16 +416,20 @@ char def;
            trailing space is wanted here in case of reprompt */
         Strcat(prompt, " ");
         custompline(OVERRIDE_MSGTYPE | SUPPRESS_HISTORY, "%s", prompt);
+        nle_ui_yn_shown(resp, def);
     } else {
         /* no restriction on allowed response, so always preserve case */
         /* preserve_case = TRUE; -- moot since we're jumping to the end */
         Sprintf(prompt, "%s ", query);
         custompline(OVERRIDE_MSGTYPE | SUPPRESS_HISTORY, "%s", prompt);
+        nle_ui_yn_shown(resp, def);
+        nle_ui_prompt(NLE_UI_YN, query, NULL, def, "");
         q = readchar();
         goto clean_up;
     }
 
     do { /* loop until we get valid input */
+        nle_ui_prompt(NLE_UI_YN, query, resp, def, "");
         q = readchar();
         if (!preserve_case)
             q = lowc(q);
@@ -433,6 +442,7 @@ char def;
                 clear_nhwindow(WIN_MESSAGE);
                 cw->maxcol = cw->maxrow;
                 addtopl(prompt);
+                nle_ui_yn_shown(resp, def);
             } else {
                 if (!doprev)
                     (void) tty_doprev_message(); /* need two initially */
@@ -449,6 +459,7 @@ char def;
             cw->maxcol = cw->maxrow;
             doprev = 0;
             addtopl(prompt);
+            nle_ui_yn_shown(resp, def);
             q = '\0'; /* force another loop iteration */
             continue;
         }
@@ -469,7 +480,7 @@ char def;
             tty_nhbell();
             q = (char) 0;
         } else if (q == '#' || digit_ok) {
-            char z, digit_string[2];
+            char z, digit_string[2], nle_number[40] = "#";
             int n_len = 0;
             long value = 0;
 
@@ -477,11 +488,13 @@ char def;
             digit_string[1] = '\0';
             if (q != '#') {
                 digit_string[0] = q;
+                nle_number[1] = q; nle_number[2] = 0;
                 addtopl(digit_string), n_len++;
                 value = q - '0';
                 q = '#';
             }
             do { /* loop until we get a non-digit */
+                nle_ui_prompt(NLE_UI_YN, query, resp, def, nle_number);
                 z = readchar();
                 if (!preserve_case)
                     z = lowc(z);
@@ -491,6 +504,7 @@ char def;
                         break; /* overflow: try again */
                     digit_string[0] = z;
                     addtopl(digit_string), n_len++;
+                    if (n_len < sizeof nle_number) { nle_number[n_len - 1] = z; nle_number[n_len] = 0; }
                 } else if (z == 'y' || index(quitchars, z)) {
                     if (z == '\033')
                         value = -1; /* abort */
@@ -502,6 +516,7 @@ char def;
                     } else {
                         value /= 10;
                         removetopl(1), n_len--;
+                        nle_number[n_len] = 0;
                     }
                 } else {
                     value = -1; /* abort */
@@ -521,6 +536,7 @@ char def;
     } while (!q);
 
  clean_up:
+    nle_ui_prompt(0, NULL, NULL, 0, NULL);
     if (yn_number)
         Sprintf(rtmp, "#%ld", yn_number);
     else

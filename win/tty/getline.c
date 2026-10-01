@@ -1,4 +1,4 @@
-/* NetHack 3.6	getline.c	$NHDT-Date: 1543830347 2018/12/03 09:45:47 $  $NHDT-Branch: NetHack-3.6.2-beta01 $:$NHDT-Revision: 1.37 $ */
+/* NetHack 3.6	getline.c	$NHDT-Date: 1543830347 2018/12/03 09:45:47 $  $NHDT-Branch: NetHack-3.6.2-beta01 $:$NHDT-Revision: 1.37 $ */ /* Binary UI modifications, 2026-10-01; see doc/nle/BINARY_UI.md. */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /* Copyright (c) Michael Allison, 2006. */
 /* Copyright (c) Facebook, Inc. and its affiliates. */
@@ -13,6 +13,7 @@
 #endif
 
 #include "wintty.h"
+#include "nle_ui.h"
 #include "func_tab.h"
 
 char morc = 0; /* tell the outside world what char you chose */
@@ -74,6 +75,7 @@ getlin_hook_proc hook;
     for (;;) {
         (void) fflush(stdout);
         Strcat(strcat(strcpy(toplines, query), " "), obufp);
+        nle_ui_prompt(NLE_UI_LINE, query, NULL, 0, obufp);
         c = pgetchar();
         if (c == '\033' || c == EOF) {
             if (c == '\033' && obufp[0] != '\0') {
@@ -194,6 +196,7 @@ getlin_hook_proc hook;
         } else
             tty_nhbell();
     }
+    nle_ui_prompt(0, NULL, NULL, 0, NULL);
     ttyDisplay->toplin = 2; /* nonempty, no --More-- required */
     ttyDisplay->inread--;
     clear_nhwindow(WIN_MESSAGE); /* clean up after ourselves */

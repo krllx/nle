@@ -1,4 +1,4 @@
-
+ /* Binary UI modifications, 2026-10-01; see doc/nle/BINARY_UI.md. */
 #include <assert.h>
 #include <string.h>
 #include <sys/time.h>
@@ -15,6 +15,7 @@
 #include "dlb.h"
 
 #include "nle.h"
+#include "nle_ui.h"
 #include "nlernd.h"
 
 #ifdef NLE_BZ2_TTYRECS
@@ -154,8 +155,8 @@ init_nle(FILE *ttyrec, nle_obs *obs)
 
     nle->observation = obs;
 
-    TMT *vterminal = tmt_open(LI, CO, nle_vt_callback, nle, NULL, true);
-    assert(vterminal);
+    TMT *vterminal = nle_ui_screen() ? tmt_open(LI, CO, nle_vt_callback, nle, NULL, true) : NULL;
+    assert(vterminal || !nle_ui_screen());
     nle->vterminal = vterminal;
 
     nle->outbuf_write_ptr = nle->outbuf;
@@ -270,7 +271,7 @@ nle_fflush(FILE *stream)
     }
 
     nle_obs *obs = nle->observation;
-    if (obs->tty_chars || obs->tty_colors || obs->tty_cursor) {
+    if (nle_ui_screen() && (obs->tty_chars || obs->tty_colors || obs->tty_cursor)) {
         tmt_write(nle->vterminal, nle->outbuf, length);
     }
     nle->outbuf_write_ptr = nle->outbuf;
@@ -289,6 +290,8 @@ nle_fflush(FILE *stream)
 int
 nle_putchar(int c)
 {
+    nle_ui_char(c);
+    if (!nle_ui_screen()) return c;
     nle_ctx_t *nle = current_nle_ctx;
     if (nle->outbuf_write_ptr >= nle->outbuf_write_end) {
         nle_fflush(stdout);
@@ -310,9 +313,14 @@ nle_xputs(const char *str)
     if (!p || !*p)
         return;
 
-    while ((c = *p++) != '\0') {
-        nle_putchar(c);
-    }
+    if ((unsigned char)*str == 27 || *str == '\b') {
+        if (!nle_ui_screen()) return;
+        while ((c = *p++) != '\0') {
+            nle_ctx_t *nle = current_nle_ctx;
+            if (nle->outbuf_write_ptr >= nle->outbuf_write_end) nle_fflush(stdout);
+            *nle->outbuf_write_ptr++ = c;
+        }
+    } else while ((c = *p++) != '\0') nle_putchar(c);
 }
 
 /*
@@ -341,6 +349,7 @@ void *
 nle_yield(void *notdone)
 {
     nle_fflush(stdout);
+    nle_ui_capture(!notdone);
     fcontext_transfer_t t =
         jump_fcontext(current_nle_ctx->returncontext, notdone);
 #if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
@@ -352,6 +361,7 @@ nle_yield(void *notdone)
     if (notdone)
         current_nle_ctx->returncontext = t.ctx;
 
+    nle_ui_resume();
     return t.data;
 }
 
@@ -506,7 +516,8 @@ nle_end(nle_ctx_t *nle)
     }
 #endif
 
-    tmt_close(nle->vterminal);
+    if (nle->vterminal) tmt_close(nle->vterminal);
+    nle_ui_release();
 
     destroy_fcontext_stack(&nle->stack);
     free(nle);

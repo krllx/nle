@@ -1,4 +1,4 @@
-/* NetHack 3.6	wintty.c	$NHDT-Date: 1575245194 2019/12/02 00:06:34 $  $NHDT-Branch: NetHack-3.6 $:$NHDT-Revision: 1.227 $ */
+/* NetHack 3.6	wintty.c	$NHDT-Date: 1575245194 2019/12/02 00:06:34 $  $NHDT-Branch: NetHack-3.6 $:$NHDT-Revision: 1.227 $ */ /* Binary UI modifications, 2026-10-01; see doc/nle/BINARY_UI.md. */
 /* Copyright (c) David Cohrs, 1991                                */
 /* NetHack may be freely redistributed.  See license for details. */
 
@@ -29,6 +29,7 @@ extern void msmsg(const char *, ...);
 #endif
 
 #include "wintty.h"
+#include "nle_ui.h"
 
 #ifdef CLIPPING /* might want SIGWINCH */
 #if defined(BSD) || defined(ULTRIX) || defined(AIX_31) || defined(_BULL_SOURCE)
@@ -2015,10 +2016,12 @@ struct WinDesc *cw;
 
             tty_curs(window, 1, page_lines);
             cl_end();
+            nle_ui_menu_state(window, page_start, page_end, curr_page, resp);
             dmore(cw, resp);
         } else {
             /* just put the cursor back... */
             tty_curs(window, (int) strlen(cw->morestr) + 2, page_lines);
+            nle_ui_menu_state(window, page_start, page_end, curr_page, resp);
             xwaitforspace(resp);
         }
 
@@ -2209,6 +2212,7 @@ struct WinDesc *cw;
         }
 
     } /* while */
+    nle_ui_window_end(window);
     cw->morestr = msave;
     free((genericptr_t) morestr);
 }
@@ -2218,16 +2222,18 @@ process_text_window(window, cw)
 winid window;
 struct WinDesc *cw;
 {
-    int i, n, attr;
+    int i, n, attr, nle_first = 0;
     boolean linestart;
     register char *cp;
 
+    nle_ui_text_reset(window);
     for (n = 0, i = 0; i < cw->maxrow; i++) {
         HUPSKIP();
         if (!cw->offx && (n + cw->offy == ttyDisplay->rows - 1)) {
             tty_curs(window, 1, n);
             cl_end();
-            dmore(cw, quitchars);
+            nle_ui_text_state(window, nle_first, i - nle_first);
+        dmore(cw, quitchars);
             if (morc == '\033') {
                 cw->flags |= WIN_CANCELLED;
                 break;
@@ -2238,6 +2244,8 @@ struct WinDesc *cw;
             } else
                 clear_screen();
             n = 0;
+            nle_first = i;
+            nle_ui_text_reset(window);
         }
         tty_curs(window, 1, n++);
 #ifdef H2344_BROKEN
@@ -2253,6 +2261,7 @@ struct WinDesc *cw;
                 ++ttyDisplay->curx;
             }
             term_start_attr(attr);
+            nle_ui_text_begin(n - 1, attr);
             for (cp = &cw->data[i][1], linestart = TRUE;
 #ifndef WIN32CON
                  *cp && (int) ++ttyDisplay->curx < (int) ttyDisplay->cols;
@@ -2272,6 +2281,7 @@ struct WinDesc *cw;
                     (void) putchar(*cp);
                 }
             }
+            nle_ui_text_end();
             term_end_attr(attr);
         }
     }
@@ -2285,10 +2295,12 @@ struct WinDesc *cw;
         tty_curs(BASE_WINDOW, (int) cw->offx + 1,
                  (cw->type == NHW_TEXT) ? (int) ttyDisplay->rows - 1 : n);
         cl_end();
+        nle_ui_text_state(window, nle_first, i - nle_first);
         dmore(cw, quitchars);
         if (morc == '\033')
             cw->flags |= WIN_CANCELLED;
     }
+    nle_ui_window_end(window);
 }
 
 /*ARGSUSED*/
@@ -2946,6 +2958,8 @@ boolean preselected;        /* item is marked as selected */
 
     item = (tty_menu_item *) alloc(sizeof *item);
     item->identifier = *identifier;
+    item->nle_text_offset = identifier->a_void ? 4 : 0;
+    item->nle_title = FALSE;
     item->count = -1L;
     item->selected = preselected;
     item->selector = ch;
@@ -3006,6 +3020,7 @@ const char *prompt; /* prompt to for menu */
                      MENU_UNSELECTED);
         tty_add_menu(window, NO_GLYPH, &any, 0, 0, ATR_NONE, prompt,
                      MENU_UNSELECTED);
+        cw->mlist->nle_title = TRUE;
     }
 
     /* 52: 'a'..'z' and 'A'..'Z'; avoids selector duplication within a page */

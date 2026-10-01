@@ -1,4 +1,4 @@
-/* NetHack 3.7	termcap.c	$NHDT-Date: 1609454952 2020/12/31 22:49:12 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.40 $ */
+/* NetHack 3.7	termcap.c	$NHDT-Date: 1609454952 2020/12/31 22:49:12 $  $NHDT-Branch: NetHack-3.7 $:$NHDT-Revision: 1.40 $ */ /* Binary UI modifications, 2026-10-01; see doc/nle/BINARY_UI.md. */
 /* Copyright (c) Stichting Mathematisch Centrum, Amsterdam, 1985. */
 /*-Copyright (c) Pasi Kallinen, 2018. */
 /* NetHack may be freely redistributed.  See license for details. */
@@ -8,6 +8,7 @@
 #if defined(TTY_GRAPHICS) && !defined(NO_TERMS)
 
 #include "wintty.h"
+#include "nle_ui.h"
 #include "tcap.h"
 
 #ifdef MICROPORT_286_BUG
@@ -495,6 +496,7 @@ int x, y;
     if ((int) ttyDisplay->cury > y) {
         if (UP) {
             while ((int) ttyDisplay->cury > y) { /* Go up. */
+                nle_ui_relative(0, -1);
                 xputs(UP);
                 ttyDisplay->cury--;
             }
@@ -507,6 +509,7 @@ int x, y;
     } else if ((int) ttyDisplay->cury < y) {
         if (XD) {
             while ((int) ttyDisplay->cury < y) {
+                nle_ui_relative(0, 1);
                 xputs(XD);
                 ttyDisplay->cury++;
             }
@@ -526,13 +529,15 @@ int x, y;
         } else { /* bah */
              /* should instead print what is there already */
             while ((int) ttyDisplay->curx < x) {
+                nle_ui_relative(1, 0);
                 xputs(nh_ND);
                 ttyDisplay->curx++;
             }
         }
     } else if ((int) ttyDisplay->curx > x) {
         while ((int) ttyDisplay->curx > x) { /* Go to the left. */
-            xputs(BC);
+            nle_ui_relative(-1, 0);
+                xputs(BC);
             ttyDisplay->curx--;
         }
     }
@@ -542,6 +547,7 @@ void
 cmov(x, y)
 register int x, y;
 {
+    nle_ui_move(x,y);
     xputs(tgoto(nh_CM, x, y));
     ttyDisplay->cury = y;
     ttyDisplay->curx = x;
@@ -588,6 +594,7 @@ const char *s;
 void
 cl_end()
 {
+    nle_ui_clear(0);
     if (CE) {
         xputs(CE);
     } else { /* no-CE fix - free after Harold Rynes */
@@ -607,6 +614,7 @@ cl_end()
 void
 clear_screen()
 {
+    nle_ui_clear(2);
     /* note: if CL is null, then termcap initialization failed,
             so don't attempt screen-oriented I/O during final cleanup.
      */
@@ -619,6 +627,7 @@ clear_screen()
 void
 home()
 {
+    nle_ui_move(0,0);
     if (HO)
         xputs(HO);
     else if (nh_CM)
@@ -631,6 +640,7 @@ home()
 void
 standoutbeg()
 {
+    nle_ui_style(ATR_BOLD,-1,1);
     if (SO)
         xputs(SO);
 }
@@ -638,6 +648,7 @@ standoutbeg()
 void
 standoutend()
 {
+    nle_ui_style(ATR_BOLD,-1,0);
     if (SE)
         xputs(SE);
 }
@@ -683,7 +694,8 @@ m_end()
 void
 backsp()
 {
-    xputs(BC);
+    nle_ui_relative(-1, 0);
+                xputs(BC);
 }
 
 void
@@ -699,6 +711,7 @@ tty_nhbell()
 void
 graph_on()
 {
+    nle_ui_graphics(1);
     if (AS)
         xputs(AS);
 }
@@ -706,6 +719,7 @@ graph_on()
 void
 graph_off()
 {
+    nle_ui_graphics(0);
     if (AE)
         xputs(AE);
 }
@@ -735,6 +749,7 @@ tty_delay_output()
 void
 cl_eos() /* free after Robert Viduya */
 {
+    nle_ui_clear(1);
     if (nh_CD) {
         xputs(nh_CD);
     } else {
@@ -1270,6 +1285,7 @@ void
 term_start_attr(attr)
 int attr;
 {
+    nle_ui_style(attr,-1,1);
     if (attr) {
         const char *astr = s_atr2str(attr);
 
@@ -1282,6 +1298,7 @@ void
 term_end_attr(attr)
 int attr;
 {
+    nle_ui_style(attr,-1,0);
     if (attr) {
         const char *astr = e_atr2str(attr);
 
@@ -1293,12 +1310,14 @@ int attr;
 void
 term_start_raw_bold()
 {
+    nle_ui_style(ATR_BOLD,-1,1);
     xputs(nh_HI);
 }
 
 void
 term_end_raw_bold()
 {
+    nle_ui_style(ATR_BOLD,-1,0);
     xputs(nh_HE);
 }
 
@@ -1307,6 +1326,7 @@ term_end_raw_bold()
 void
 term_end_color()
 {
+    nle_ui_style(-1,-1,0);
     xputs(nh_HE);
 }
 
@@ -1314,6 +1334,12 @@ void
 term_start_color(color)
 int color;
 {
+    /* ANSI_DEFAULT init_hilite: gray/NO_COLOR emit nothing; black is
+       bright black or blue; low colors reset attributes before setting fg. */
+    if (color < CLR_MAX && color != CLR_GRAY && color != NO_COLOR) {
+        int actual = color == CLR_BLACK ? (iflags.wc2_darkgray ? 8 : CLR_BLUE) : color;
+        nle_ui_style(0, actual, actual & BRIGHT ? 1 : 2);
+    }
     if (color < CLR_MAX)
         xputs(hilites[color]);
 }
