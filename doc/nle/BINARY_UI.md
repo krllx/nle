@@ -56,7 +56,8 @@ Its final 59-file corpus replay checked 2300775 actions, all 14 rendered observa
 non-screen arrays with drawing disabled, done/control/metrics and on/off UI entities,
 with zero differences. Direct-input/visible-page/lifetime tests and independent full
 screen converter also passed. Go CPU and allocation profiles are in the runner report.
-A fresh build/replay from this source branch is verified again before publication.
+Fresh direct-source build and all 59 games passed before publication: 2300775 actions,
+zero differences in every listed check. See [validation record](BINARY_UI_VALIDATION.json).
 
 ## Maintenance
 

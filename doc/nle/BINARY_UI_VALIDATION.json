@@ -1,0 +1,24 @@
+{
+  "base": "70cb9b5260d05b38ee1ee1b0228d5f6f8ca54655",
+  "code_commit": "89468e7f5e09a760ef9c231c996d8a61e73a1b06",
+  "NLE": "1.3.0",
+  "NetHack": "3.6.7",
+  "binary_ui_abi": 3,
+  "platform": "Linux amd64 under Colima/Rosetta",
+  "epoch": 1700000000,
+  "corpus_games": 59,
+  "actions": 2300775,
+  "failures": 0,
+  "checks": [
+    "independent arena stock vs fork with screen: all 14 public observations",
+    "fork no-screen: all non-screen observations and zero tty writes",
+    "control/done/status and final metrics",
+    "screen-on/off structured UI entities",
+    "diagnostic chars/colors/cursor",
+    "visible menu/text/input/getpos/end",
+    "retained UI data after step/reset/close"
+  ],
+  "library_sha256": "574d1f627c3633d4da295c9f0707ec332a2125975dd7416612cdd3d3a9c8c058",
+  "replay_log_sha256": "797859e3bc729f4749b61184ae47e1f40f3c7d766f347e60f6ae31057ab80979",
+  "corpus_manifest_sha256": "3c1e0010b49ea7d7c4c87654e24aef727903279b77e33fcbed584fb243223884"
+}
