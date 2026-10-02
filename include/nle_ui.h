@@ -35,8 +35,11 @@ typedef struct nle_ui_v3 {
 } nle_ui_v3;
 int nle_ui_configure_v3(uint32_t flags);
 const nle_ui_v3 *nle_ui_current_v3(void);
-int nle_ui_enabled(void);
-int nle_ui_screen(void);
+/* Library-private flags: hidden visibility prevents symbol interposition between
+ * the memfd-private library copies. Inline tests skip disabled UI at call sites. */
+extern uint32_t nle_ui_config_flags __attribute__((visibility("hidden")));
+static inline int nle_ui_enabled(void) { return !!(nle_ui_config_flags & NLE_UI_ENABLED); }
+static inline int nle_ui_screen(void) { return !!(nle_ui_config_flags & NLE_UI_SCREEN); }
 void nle_ui_move(int x,int y);
 void nle_ui_relative(int dx,int dy);
 void nle_ui_clear(int kind);
@@ -58,6 +61,14 @@ void nle_ui_window_end(int window);
 void nle_ui_capture(int ended);
 void nle_ui_resume(void);
 void nle_ui_release(void);
+#ifndef NLE_UI_IMPLEMENTATION
+#define NLE_UI_IF_ENABLED(fn, ...) do { if (nle_ui_enabled()) (fn)(__VA_ARGS__); } while (0)
+#define nle_ui_move(x,y) NLE_UI_IF_ENABLED(nle_ui_move, x, y)
+#define nle_ui_relative(x,y) NLE_UI_IF_ENABLED(nle_ui_relative, x, y)
+#define nle_ui_clear(k) NLE_UI_IF_ENABLED(nle_ui_clear, k)
+#define nle_ui_char(c) NLE_UI_IF_ENABLED(nle_ui_char, c)
+#define nle_ui_style(a,c,on) NLE_UI_IF_ENABLED(nle_ui_style, a, c, on)
+#endif
 #ifdef __cplusplus
 }
 #endif
