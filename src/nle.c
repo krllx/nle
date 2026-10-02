@@ -5,6 +5,8 @@
 #include <unistd.h>
 
 #include <tmt.h>
+#include "direct.h"
+#include "nle_tty.h"
 
 #define NEED_VARARGS
 #ifdef MONITOR_HEAP
@@ -51,6 +53,87 @@ effective_stack_size(void)
 #endif
 
 extern int unixmain(int, char **);
+
+int nle_fflush(FILE *);
+
+/* Versioned optional API. nle_obs and nle_settings are unchanged. */
+static int tty_mode; /* 0 stock, 1 direct, 2 shadow */
+static direct_screen tty_direct;
+static unsigned long long tty_comparisons, tty_mismatches;
+static int tty_active;
+int nle_tty_set_mode_v1(int mode)
+{
+    if (tty_active || mode < 0 || mode > 2) return -1;
+    tty_mode = mode;
+    return 0;
+}
+int nle_tty_mode_v1(void) { return tty_mode; }
+void nle_tty_stats_v1(unsigned long long *comparisons, unsigned long long *mismatches)
+{
+    *comparisons = tty_comparisons;
+    *mismatches = tty_mismatches;
+}
+static void tty_publish(nle_obs *obs)
+{
+    for (size_t r = 0; r < D_ROWS; ++r) if (tty_direct.dirty & (1u << r)) {
+        if (obs->tty_chars) memcpy(obs->tty_chars + r * D_COLS,
+                                  tty_direct.chars + r * D_COLS, D_COLS);
+        if (obs->tty_colors) memcpy(obs->tty_colors + r * D_COLS,
+                                   tty_direct.colors + r * D_COLS, D_COLS);
+    }
+    if (obs->tty_cursor) {
+        obs->tty_cursor[0] = tty_direct.row;
+        obs->tty_cursor[1] = tty_direct.col;
+    }
+    tty_direct.dirty = 0;
+    tty_direct.pending = 0;
+}
+static void tty_compare(nle_obs *obs)
+{
+    ++tty_comparisons;
+    for (size_t i = 0; i < D_ROWS * D_COLS; ++i) {
+        if ((obs->tty_chars && obs->tty_chars[i] != tty_direct.chars[i]) ||
+            (obs->tty_colors && obs->tty_colors[i] != tty_direct.colors[i])) {
+            ++tty_mismatches;
+            fprintf(stderr, "direct tty mismatch at %zu,%zu: chars %u/%u colors %d/%d\n",
+                    i / D_COLS, i % D_COLS,
+                    obs->tty_chars ? obs->tty_chars[i] : 0, tty_direct.chars[i],
+                    obs->tty_colors ? obs->tty_colors[i] : 0, tty_direct.colors[i]);
+            abort();
+        }
+    }
+    if (obs->tty_cursor && (obs->tty_cursor[0] != tty_direct.row ||
+                           obs->tty_cursor[1] != tty_direct.col)) {
+        ++tty_mismatches;
+        fprintf(stderr, "direct tty cursor mismatch: %u,%u/%zu,%zu\n",
+                obs->tty_cursor[0], obs->tty_cursor[1], tty_direct.row, tty_direct.col);
+        abort();
+    }
+    tty_direct.dirty = 0;
+    tty_direct.pending = 0;
+}
+/* Called before serializing the equivalent ANSI sequence. Shadow keeps the
+ * original serialized path independent. Direct never creates those bytes. */
+int nle_tty_op(int op, int a, int b, size_t stock_bytes)
+{
+    if (!nle_ui_screen()) return 1; /* Events were captured before this call. */
+    if (!tty_mode) return 0;
+    nle_ctx_t *nle = current_nle_ctx;
+    if (tty_mode == 2 && nle->outbuf_write_end - nle->outbuf_write_ptr < stock_bytes)
+        nle_fflush(stdout);
+    direct_apply(&tty_direct, (enum direct_op)op, a, b);
+    return tty_mode == 1;
+}
+/* The serialized half of a command must bypass direct_char. */
+void nle_tty_escape(const char *str)
+{
+    if (!str || !nle_ui_screen()) return;
+    nle_ctx_t *nle = current_nle_ctx;
+    for (; *str; ++str) {
+        if (nle->outbuf_write_ptr >= nle->outbuf_write_end) nle_fflush(stdout);
+        *nle->outbuf_write_ptr++ = *str;
+    }
+}
 
 signed char
 vt_char_color_extract(TMTCHAR *c)
@@ -155,8 +238,18 @@ init_nle(FILE *ttyrec, nle_obs *obs)
 
     nle->observation = obs;
 
-    TMT *vterminal = nle_ui_screen() ? tmt_open(LI, CO, nle_vt_callback, nle, NULL, true) : NULL;
-    assert(vterminal || !nle_ui_screen());
+    if (ttyrec && (tty_mode || !nle_ui_screen())) {
+        fprintf(stderr, "ttyrec requires stock renderer with screen enabled\n");
+        abort();
+    }
+    tty_active = 1;
+    tty_comparisons = tty_mismatches = 0;
+    if (nle_ui_screen() && tty_mode) direct_init(&tty_direct);
+    if (nle_ui_screen() && tty_mode == 1) tty_publish(obs);
+    TMT *vterminal = nle_ui_screen() && tty_mode != 1
+        ? tmt_open(LI, CO, nle_vt_callback, nle, NULL, true) : NULL;
+    assert(vterminal || !nle_ui_screen() || tty_mode == 1);
+    if (nle_ui_screen() && tty_mode == 2) tty_compare(obs);
     nle->vterminal = vterminal;
 
     nle->outbuf_write_ptr = nle->outbuf;
@@ -261,9 +354,13 @@ nle_fflush(FILE *stream)
     }
     nle_ctx_t *nle = current_nle_ctx;
 
+    if (!nle_ui_screen()) return 0;
     ssize_t length = nle->outbuf_write_ptr - nle->outbuf;
-    if (length == 0)
+    if (tty_mode == 1) {
+        if (tty_direct.pending) tty_publish(nle->observation);
         return 0;
+    }
+    if (length == 0) return 0;
 
     if (nle->ttyrec) {
         write_ttyrec_header(length, 0);
@@ -274,6 +371,7 @@ nle_fflush(FILE *stream)
     if (nle_ui_screen() && (obs->tty_chars || obs->tty_colors || obs->tty_cursor)) {
         tmt_write(nle->vterminal, nle->outbuf, length);
     }
+    if (tty_mode == 2) tty_compare(obs);
     nle->outbuf_write_ptr = nle->outbuf;
 
 #ifdef NLE_BZ2_TTYRECS
@@ -296,6 +394,14 @@ nle_putchar(int c)
     if (nle->outbuf_write_ptr >= nle->outbuf_write_end) {
         nle_fflush(stdout);
     }
+    if (tty_mode) {
+        if ((unsigned char)c == 27) {
+            fprintf(stderr, "unexpected raw ANSI in direct tty character output\n");
+            abort();
+        }
+        direct_char(&tty_direct, c);
+        if (tty_mode == 1) return c;
+    }
     *nle->outbuf_write_ptr++ = c;
     return c;
 }
@@ -315,6 +421,10 @@ nle_xputs(const char *str)
 
     if ((unsigned char)*str == 27 || *str == '\b') {
         if (!nle_ui_screen()) return;
+        if (tty_mode) {
+            fprintf(stderr, "unhandled raw terminal capability in direct renderer\n");
+            abort();
+        }
         while ((c = *p++) != '\0') {
             nle_ctx_t *nle = current_nle_ctx;
             if (nle->outbuf_write_ptr >= nle->outbuf_write_end) nle_fflush(stdout);
@@ -517,6 +627,7 @@ nle_end(nle_ctx_t *nle)
 #endif
 
     if (nle->vterminal) tmt_close(nle->vterminal);
+    tty_active = 0;
     nle_ui_release();
 
     destroy_fcontext_stack(&nle->stack);

@@ -10,6 +10,16 @@
 #include "wintty.h"
 #include "nle_ui.h"
 #include "tcap.h"
+#include "direct.h"
+extern int nle_tty_op(int, int, int, size_t);
+extern void nle_tty_escape(const char *);
+/* Evaluate a capability only in stock/shadow. Reserve its entire sequence
+ * before applying the direct operation, so buffer-full flushes agree. */
+#define TTY_CMD(op, a, b, seq) do { \
+    const char *tty_seq = (seq); \
+    size_t tty_len = tty_seq ? strlen(tty_seq) : 0; \
+    if (!nle_tty_op((op), (a), (b), tty_len)) nle_tty_escape(tty_seq); \
+} while (0)
 
 #ifdef MICROPORT_286_BUG
 #define Tgetstr(key) (tgetstr(key, tbuf))
@@ -335,11 +345,11 @@ int state;
     switch (state) {
     case -1: /* activate keypad mode (escape sequences) */
         if (KS && *KS)
-            xputs(KS);
+            TTY_CMD(D_NOP, 0, 0, KS);
         break;
     case 1: /* activate numeric mode for keypad (digits) */
         if (KE && *KE)
-            xputs(KE);
+            TTY_CMD(D_NOP, 0, 0, KE);
         break;
     case 0: /* don't need to do anything--leave terminal as-is */
     default:
@@ -381,7 +391,7 @@ tty_decgraphics_termcap_fixup()
      * reasonably be using the UK character set.
      */
     if (SYMHANDLING(H_DEC))
-        xputs("\033)0");
+        TTY_CMD(D_NOP, 0, 0, "\033)0");
 #ifdef PC9800
     init_hilite();
 #endif /* PC9800 */
@@ -448,8 +458,8 @@ tty_ascgraphics_hilite_fixup()
 void
 tty_start_screen()
 {
-    xputs(TI);
-    xputs(VS);
+    TTY_CMD(D_RESET_ATTR, 0, 0, TI);
+    TTY_CMD(D_NOP, 0, 0, VS);
 #ifdef PC9800
     if (!SYMHANDLING(H_IBM))
         tty_ascgraphics_hilite_fixup();
@@ -477,8 +487,8 @@ void
 tty_end_screen()
 {
     clear_screen();
-    xputs(VE);
-    xputs(TE);
+    TTY_CMD(D_NOP, 0, 0, VE);
+    TTY_CMD(D_NOP, 0, 0, TE);
 }
 
 /* Cursor movements */
@@ -497,7 +507,7 @@ int x, y;
         if (UP) {
             while ((int) ttyDisplay->cury > y) { /* Go up. */
                 nle_ui_relative(0, -1);
-                xputs(UP);
+                TTY_CMD(D_UP, 0, 0, UP);
                 ttyDisplay->cury--;
             }
         } else if (nh_CM) {
@@ -510,7 +520,7 @@ int x, y;
         if (XD) {
             while ((int) ttyDisplay->cury < y) {
                 nle_ui_relative(0, 1);
-                xputs(XD);
+                TTY_CMD(D_DOWN, 0, 0, XD);
                 ttyDisplay->cury++;
             }
         } else if (nh_CM) {
@@ -530,14 +540,14 @@ int x, y;
              /* should instead print what is there already */
             while ((int) ttyDisplay->curx < x) {
                 nle_ui_relative(1, 0);
-                xputs(nh_ND);
+                TTY_CMD(D_RIGHT, 0, 0, nh_ND);
                 ttyDisplay->curx++;
             }
         }
     } else if ((int) ttyDisplay->curx > x) {
         while ((int) ttyDisplay->curx > x) { /* Go to the left. */
             nle_ui_relative(-1, 0);
-                xputs(BC);
+                TTY_CMD(D_LEFT, 0, 0, BC);
             ttyDisplay->curx--;
         }
     }
@@ -548,7 +558,8 @@ cmov(x, y)
 register int x, y;
 {
     nle_ui_move(x,y);
-    xputs(tgoto(nh_CM, x, y));
+    if (!nle_tty_op(D_MOVE, x, y, 20))
+        nle_tty_escape(tgoto(nh_CM, x, y));
     ttyDisplay->cury = y;
     ttyDisplay->curx = x;
 }
@@ -596,7 +607,7 @@ cl_end()
 {
     nle_ui_clear(0);
     if (CE) {
-        xputs(CE);
+        TTY_CMD(D_EOL, 0, 0, CE);
     } else { /* no-CE fix - free after Harold Rynes */
         register int cx = ttyDisplay->curx + 1;
 
@@ -619,7 +630,7 @@ clear_screen()
             so don't attempt screen-oriented I/O during final cleanup.
      */
     if (CL) {
-        xputs(CL);
+        TTY_CMD(D_CLEAR, 0, 0, CL);
         home();
     }
 }
@@ -629,9 +640,11 @@ home()
 {
     nle_ui_move(0,0);
     if (HO)
-        xputs(HO);
-    else if (nh_CM)
-        xputs(tgoto(nh_CM, 0, 0));
+        TTY_CMD(D_HOME, 0, 0, HO);
+    else if (nh_CM) {
+        if (!nle_tty_op(D_MOVE, 0, 0, 20))
+            nle_tty_escape(tgoto(nh_CM, 0, 0));
+    }
     else
         tty_curs(BASE_WINDOW, 1, 0); /* using UP ... */
     ttyDisplay->curx = ttyDisplay->cury = 0;
@@ -642,7 +655,7 @@ standoutbeg()
 {
     nle_ui_style(ATR_BOLD,-1,1);
     if (SO)
-        xputs(SO);
+        TTY_CMD(D_BOLD, 0, 0, SO);
 }
 
 void
@@ -650,7 +663,7 @@ standoutend()
 {
     nle_ui_style(ATR_BOLD,-1,0);
     if (SE)
-        xputs(SE);
+        TTY_CMD(D_RESET_ATTR, 0, 0, SE);
 }
 
 #if 0 /* if you need one of these, uncomment it (here and in extern.h) */
@@ -658,21 +671,21 @@ void
 revbeg()
 {
     if (MR)
-        xputs(MR);
+        TTY_CMD(D_REVERSE, 0, 0, MR);
 }
 
 void
 boldbeg()
 {
     if (MD)
-        xputs(MD);
+        TTY_CMD(D_BOLD, 0, 0, MD);
 }
 
 void
 blinkbeg()
 {
     if (MB)
-        xputs(MB);
+        TTY_CMD(D_NOP, 0, 0, MB);
 }
 
 void
@@ -680,14 +693,14 @@ dimbeg()
 {
     /* not in most termcap entries */
     if (MH)
-        xputs(MH);
+        TTY_CMD(D_NOP, 0, 0, MH);
 }
 
 void
 m_end()
 {
     if (ME)
-        xputs(ME);
+        TTY_CMD(D_RESET_ATTR, 0, 0, ME);
 }
 #endif /*0*/
 
@@ -695,7 +708,7 @@ void
 backsp()
 {
     nle_ui_relative(-1, 0);
-                xputs(BC);
+                TTY_CMD(D_LEFT, 0, 0, BC);
 }
 
 void
@@ -713,7 +726,7 @@ graph_on()
 {
     nle_ui_graphics(1);
     if (AS)
-        xputs(AS);
+        TTY_CMD(D_NOP, 0, 0, AS);
 }
 
 void
@@ -721,7 +734,7 @@ graph_off()
 {
     nle_ui_graphics(0);
     if (AE)
-        xputs(AE);
+        TTY_CMD(D_NOP, 0, 0, AE);
 }
 #endif /* ASCIIGRAPH */
 
@@ -751,7 +764,7 @@ cl_eos() /* free after Robert Viduya */
 {
     nle_ui_clear(1);
     if (nh_CD) {
-        xputs(nh_CD);
+        TTY_CMD(D_EOS, 0, 0, nh_CD);
     } else {
         register int cy = ttyDisplay->cury + 1;
 
@@ -1290,7 +1303,8 @@ int attr;
         const char *astr = s_atr2str(attr);
 
         if (astr && *astr)
-            xputs(astr);
+            TTY_CMD(attr == ATR_INVERSE ? D_REVERSE :
+                    attr == ATR_ULINE ? D_UNDERLINE : D_BOLD, 0, 0, astr);
     }
 }
 
@@ -1303,7 +1317,7 @@ int attr;
         const char *astr = e_atr2str(attr);
 
         if (astr && *astr)
-            xputs(astr);
+            TTY_CMD(D_RESET_ATTR, 0, 0, astr);
     }
 }
 
@@ -1311,14 +1325,14 @@ void
 term_start_raw_bold()
 {
     nle_ui_style(ATR_BOLD,-1,1);
-    xputs(nh_HI);
+    TTY_CMD(D_BOLD, 0, 0, nh_HI);
 }
 
 void
 term_end_raw_bold()
 {
     nle_ui_style(ATR_BOLD,-1,0);
-    xputs(nh_HE);
+    TTY_CMD(D_RESET_ATTR, 0, 0, nh_HE);
 }
 
 #ifdef TEXTCOLOR
@@ -1327,7 +1341,7 @@ void
 term_end_color()
 {
     nle_ui_style(-1,-1,0);
-    xputs(nh_HE);
+    TTY_CMD(D_RESET_ATTR, 0, 0, nh_HE);
 }
 
 void
@@ -1341,7 +1355,7 @@ int color;
         nle_ui_style(0, actual, actual & BRIGHT ? 1 : 2);
     }
     if (color < CLR_MAX)
-        xputs(hilites[color]);
+        TTY_CMD(D_COLOR, color, iflags.wc2_darkgray, hilites[color]);
 }
 
 #endif /* TEXTCOLOR */
