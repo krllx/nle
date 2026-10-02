@@ -16,6 +16,7 @@ extern void nle_tty_escape(const char *);
 /* Evaluate a capability only in stock/shadow. Reserve its entire sequence
  * before applying the direct operation, so buffer-full flushes agree. */
 #define TTY_CMD(op, a, b, seq) do { \
+    if (!nle_ui_screen()) break; \
     const char *tty_seq = (seq); \
     size_t tty_len = tty_seq ? strlen(tty_seq) : 0; \
     if (!nle_tty_op((op), (a), (b), tty_len)) nle_tty_escape(tty_seq); \

@@ -2,13 +2,14 @@
  * Optional draw operations observe native positioning/style, never ANSI. */
 #include "hack.h"
 #include "wintty.h"
+#define NLE_UI_IMPLEMENTATION
 #include "nle_ui.h"
 _Static_assert(sizeof(nle_ui_v3)==192, "UI ABI header");
 _Static_assert(sizeof(nle_ui_menu)==40, "UI ABI menu");
 _Static_assert(sizeof(nle_ui_text)==28, "UI ABI text");
 _Static_assert(sizeof(nle_ui_draw)==28, "UI ABI draw");
 extern boolean xwaitingforspace;
-static uint32_t config=NLE_UI_SCREEN;
+uint32_t nle_ui_config_flags __attribute__((visibility("hidden"))) = NLE_UI_SCREEN;
 static nle_ui_v3 ui;
 static char *bytes;
 static size_t bytes_cap,msg_cap,menu_cap,text_cap,draw_cap;
@@ -86,8 +87,6 @@ void nle_ui_text_begin(int row,int a) {
 }
 void nle_ui_text_end(void){shown_active=-1;}
 
-int nle_ui_enabled(void) { return !!(config & NLE_UI_ENABLED); }
-int nle_ui_screen(void) { return !!(config & NLE_UI_SCREEN); }
 static int grow(void **p,size_t *cap,size_t count,size_t size) {
  size_t n; void *q;
  if(count<=*cap)return 1;
@@ -105,7 +104,7 @@ static nle_ui_string str(const char *s) {return stringn(s,s?strlen(s):0);}
 static int color(int c) {return (fg<0 ? (c==' '?0:7) : fg|(bold?8:0))+(inverse?16:0);}
 static void draw(int kind,int x,int y,int c) {
  nle_ui_draw *d; char ch=c;
- if(!(config&NLE_UI_DIAGNOSTICS)||!nle_ui_enabled())return;
+ if(!(nle_ui_config_flags&NLE_UI_DIAGNOSTICS)||!nle_ui_enabled())return;
  if(kind==1 && ui.draw_count) {
   d=&draws[ui.draw_count-1];
   if(d->kind==1 && d->y==y && d->x+(int)d->text.length==x && d->color==color(c)
@@ -121,7 +120,7 @@ static void draw(int kind,int x,int y,int c) {
 }
 int nle_ui_configure_v3(uint32_t flags) {
  if((flags&~7u)||!(flags&NLE_UI_SCREEN)&&!(flags&NLE_UI_ENABLED))return -1;
- config=flags;memset(&ui,0,sizeof ui);ui.version=3;ui.size=sizeof ui;
+ nle_ui_config_flags=flags;memset(&ui,0,sizeof ui);ui.version=3;ui.size=sizeof ui;
  ui.features=NLE_UI_FEATURES|((flags&NLE_UI_DIAGNOSTICS)?128u:0);
  ux=uy=bold=inverse=attr=graphics=position=failed=prompt_kind=0;fg=-1;
  shown_next=0;shown_active=-1;memset(indicators,0,sizeof indicators);more_active=0;
